@@ -1,0 +1,302 @@
+#cloud-config
+ 
+chpasswd:
+  list: |
+    root:default
+    admin:admin
+  expire: False
+ 
+write_files:
+  - path: /shared/custom-config.sh
+    permissions: 0755
+    owner: root:root
+    content: |
+      #!/bin/bash
+
+      export ci_dir='/shared/cloud_init'
+      export mgmt_addr='192.168.20.83'
+      export mgmt_subnet='24'
+      export mgmt_gateway='192.168.20.1'
+      echo "$(date +%T) > ${ci_dir}/CLOUD_INIT_PHASE_1"
+ 
+      # Wait for MCPD to be up before running tmsh commands
+      source /usr/lib/bigstart/bigip-ready-functions
+      wait_bigip_ready
+ 
+      test -d ${ci_dir} || mkdir ${ci_dir}
+      ln -s ${ci_dir} /root/ci_dir
+
+      # Begin BIG-IP configuration
+      tmsh modify sys global-settings gui-setup disabled
+      tmsh modify sys global-settings gui-security-banner-text "Configured via Cloud-Init!"
+      tmsh modify sys global-settings mgmt-dhcp disabled
+      tmsh delete sys management-ip all
+      tmsh delete sys management-route all
+      tmsh create sys management-ip ${mgmt_addr}/${mgmt_subnet}
+      tmsh create sys management-route default gateway ${mgmt_gateway}
+      tmsh modify sys db ipv6.enabled value false
+      tmsh save /sys config
+
+  - path: /shared/post_install_cmds.bash
+    permissions: 0755
+    owner: root:root
+    content: |
+      #! /bin/bash
+
+      repo='https://raw.githubusercontent.com/jessed/f5_env/master/env_files'
+      files='env.ltm vimrc.ltm'
+
+      # Download environment files
+      for f in $files; do curl -s ${repo}/$f -o /shared/${f}; done
+
+      # Create symlinks
+      ln -s /shared/env.ltm   /root/.env.ltm
+      ln -s /shared/vimrc.ltm /root/.vimrc
+      ln -s /shared/env.ltm   /home/admin/.env.ltm
+      ln -s /shared/vimrc.ltm /home/admin/.vimrc
+
+      # Modify ~/.bash_profile
+      sed -i  's/^cd \/config/#cd \/config/' /root/.bash_profile
+      sed -i  's/^cd \/config/#cd \/config/' /home/admin/.bash_profile
+
+      echo 'source /shared/env.ltm' >> /root/.bash_profile
+      echo 'source /shared/env.ltm' >> /home/admin/.bash_profile
+
+
+  - path: /shared/runtime-conf-bash.bash
+    permissions: 0755
+    owner: root:root
+    content: |
+      #!/bin/bash
+
+      ci_dir='/shared/cloud_init'
+      ci_runtime="f5-bigip-runtime-init-1.5.2-1.gz.run"
+      runtime_url="https://cdn.f5.com/product/cloudsolutions/f5-bigip-runtime-init/v1.5.2/dist"
+
+      echo "$(date +%T) > ${ci_dir}/CLOUD_INIT_PHASE_2"
+ 
+      # ensure iPkg installation directory exists
+      mkdir -p /var/config/rest/downloads
+
+      # Create cloud_init dir if it is not already present
+      test -d ${ci_dir} || mkdir ${ci_dir}
+
+      # define log file
+      LOG_FILE=${ci_dir}/cloud_init.log
+      # Use log file for all log output
+      [[ ! -f $LOG_FILE ]] && touch $LOG_FILE || { echo "Run Only Once. Exiting"; exit; }
+      npipe=/tmp/$$.tmp
+      trap "rm -f $npipe" EXIT
+      mknod $npipe p
+      tee <$npipe -a $LOG_FILE /dev/ttyS0 &
+      exec 1>&-
+      exec 1>$npipe
+      exec 2>&1
+ 
+      # Download or Render BIG-IP Runtime Init Config
+      echo "($(date +%T)) Creating ${ci_dir}/runtime-init-conf.yaml"
+      cat << 'EOF' > ${ci_dir}/runtime-init-conf.yaml
+      ---
+      controls:
+        logLevel:                   silly
+        logFilename:                /shared/cloud_init/bigip-runtime-init.log
+        extensionInstallDelayInMs:  30000
+      pre_onboard_enabled: []
+      post_onboard_enabled:
+        - name: final_commands
+          type: inline
+          commands:
+            - /shared/post_install_cmds.bash
+      bigip_ready_enabled: []
+      runtime_parameters:
+        - name:   ADMIN_USER
+          type:   static
+          value:  'admin'
+        - name:   ADMIN_PASS
+          type:   static
+          value:  'admin'
+        - name:   ROOT_PASS
+          type:   static
+          value:  'default'
+        - name:   PUB_KEY
+          type:   static
+          value:  'ssh-rsa AAAAB3NzaC1yc2EAAAABIwAAAQEAvLfpHzqjGvp7WL8imztN3ykjY1n2KYxW2gNtOXrXgyxVRpufARpcL/aP5ykC3h9hSzjhVObxDDMuc+LKvQ6gvl2VvobkyRe73KZXQz9OUcOtHX3iO95LwkhQgSy2/VoGgxysKG1k7zEu2jVYX+3mRleQOTo3mD2ZTLc/gGnJC3/+6l2vgI9/26CoIoeL6HKmjLdRE5YyeKHfzpH8coJgY9rHeulbS1aAjmiUOUXwzrMyc83eY+Sxv97ujR5UA1ONZ7KOjQPlDY3ACjQfnZ9SVbCfGy7pYAZMyizSSeyNp8lHMRJKf1Deo5rZoUngBAH6ZjDUmMJMroNcoqY/IL8/ZQ=='
+        - name:   HOST_NAME
+          type:   static
+          value:  'ltm03.compute.local'
+        - name:   LICENSE_KEY
+          type:   static
+          value:  'ZALLF-FTRZN-MIITH-ELDPG-ZFQWAUQ'
+        - name:   mgmt_gateway
+          type:   static
+          value:  '192.168.20.1'
+        - name:   v1_ip
+          type:   static
+          value:  '10.1.1.3/16'
+        - name:   v2_ip
+          type:   static
+          value:  '10.2.1.3/16'
+        - name:   v3_ip
+          type:   static
+          value:  '10.3.1.3/16'
+        - name:   v1_tag
+          type:   static
+          value:  '1'
+        - name:   v2_tag
+          type:   static
+          value:  '2'
+        - name:   v3_tag
+          type:   static
+          value:  '3'
+        - name:   v1_int
+          type:   static
+          value:  '1.1'
+        - name:   v2_int
+          type:   static
+          value:  '1.2'
+        - name:   v3_int
+          type:   static
+          value:  '1.3'
+
+      extension_packages:
+        install_operations:
+          - extensionType:    do
+            extensionVersion: 1.34.0
+            extensionHash:    5e58bc15a4c436494599dfc509c87f02400339e6c0ce8275df259d5f1585146b
+          #- extensionType:    ts
+          #  extensionVersion: 1.32.0
+          #  extensionHash:    a6bf242728a5ba1b8b8f26b59897765567db7e0f0267ba9973f822be3ab387b6
+          #- extensionType:    as3
+          #  extensionVersion: 3.41.0
+          #  extensionHash:    ced0948208f4dc29af7c0ea3a925a28bf8b8690a263588374e3c3d2689999490
+
+      extension_services:
+        service_operations:
+          - extensionType: do
+            type: inline
+            value:
+              schemaVersion: 1.0.0
+              class: Device
+              async: true
+              label: Example 4NIC BIG-IP with Runtime-Init
+              Common:
+                class: Tenant
+                My_System:
+                  class: System
+                  hostname: '{{{HOST_NAME}}}'
+                  cliInactivityTimeout: 86400
+                  consoleInactivityTimeout: 3600
+                  tmshAuditLog: true
+                  guiAuditLog: true
+                  mcpAuditLog: enable
+                  autoPhonehome: false
+                My_DbVariables:
+                  class: DbVariables
+                  ui.advisory.enabled: true
+                  ui.advisory.color: blue
+                  ui.advisory.text: BIG-IP VE Runtime Init Example
+                  config.allow.rfc3927: enable
+                  dhclient.mgmt: disable
+                  systemauth.disablerootlogin: false
+                  provision.extramb: 1000
+                  restjavad.useextramb: true
+                  iapplxrpm.timeout: 300
+                  icrd.timeout: 180
+                  restjavad.timeout: 180
+                  restnoded.timeout: 180
+                  users.strictpasswords: disable
+                  log.tcpdump.level: error
+                  tm.tcpsegmentationoffload: disable
+                  tmm.tcl.rule.connect.allow_loopback_addresses: true
+                  #tmm.tcl.rule.node.allow_loopback_addresses: true
+                root:
+                  class:          User
+                  userType:       root
+                  oldPassword:    '{{{ROOT_PASS}}}'
+                  newPassword:    '{{{ROOT_PASS}}}'
+                  keys:           [ '{{{PUB_KEY}}}' ]
+                admin:
+                  class:          User
+                  userType:       regular
+                  password:       '{{{ADMIN_PASS}}}'
+                  keys:           [ '{{{PUB_KEY}}}' ]
+                  shell:          bash
+                My_Dns:
+                  class:          DNS
+                  nameServers:    [ 4.2.2.2 ]
+                My_Ntp:
+                  class:          NTP
+                  servers:        [ 'tick.ucla.edu' ]
+                  timezone:       'Pacific'
+                #MyLicense:
+                #  class:          'License'
+                #  licenseType:    'regKey'
+                #  regKey:         '{{{LICENSE_KEY}}}'
+                My_Provisioning:
+                  class:          Provision
+                  ltm:            nominal
+                v1:
+                  class:          VLAN
+                  tag:            '{{{v1_tag}}}'
+                  mtu:            1460
+                  interfaces:
+                    - name:       '{{{v1_int}}}'
+                      tagged:     false
+                v2:
+                  class:          VLAN
+                  tag:            '{{{v2_tag}}}'
+                  mtu:            1460
+                  interfaces:
+                    - name:       '{{{v2_int}}}'
+                      tagged:     false
+                v3:
+                  class:          VLAN
+                  tag:            '{{{v3_tag}}}'
+                  mtu:            1460
+                  interfaces:
+                    - name:       '{{{v3_int}}}'
+                      tagged:     false
+                v1-self:
+                  class:          SelfIp
+                  address:        '{{{v1_ip}}}'
+                  vlan:           v1
+                  allowService:   default
+                  trafficGroup:   traffic-group-local-only
+                v2-self:
+                  class:          SelfIp
+                  address:        '{{{v2_ip}}}'
+                  vlan:           v2
+                  allowService:   default
+                  trafficGroup:   traffic-group-local-only
+                v3-self:
+                  class:          SelfIp
+                  address:        '{{{v3_ip}}}'
+                  vlan:           v3
+                  allowService:   default
+                  trafficGroup:   traffic-group-local-only
+      EOF
+ 
+      # Download and install BIG-IP runtime init 
+      echo "($(date +%T)) Downloading and installing '${ci_runtime}'."
+      echo "curl -s ${runtime_url}/${ci_runtime} -o ${ci_dir}/${ci_runtime}"
+      curl -s ${runtime_url}/${ci_runtime} -o ${ci_dir}/${ci_runtime} > ${ci_dir}/runtime_install.log 2>&1
+      if [[ $? == 0 ]]; then
+        echo "($(date +%T)) Download successful, proceeding with installation..."
+        echo "bash ${ci_dir}/${ci_runtime} -- > ${ci_dir}/runtime_install.log"
+        bash ${ci_dir}/${ci_runtime} -- >> ${ci_dir}/runtime_install.log 2>&1
+      fi
+
+      # wait for download and installation done 
+      echo "($(date +%T)) Waiting for f5-bigip-runtime-init-1.5.2.1 installation to complete (20 seconds)"
+      sleep 20
+
+      # Run runtime-init
+      echo "($(date +%T)) Executing runtime configuration"
+      echo "f5-bigip-runtime-init --config-file ${ci_dir}/runtime-init-conf.yaml --skip-telemetry"
+      f5-bigip-runtime-init --config-file ${ci_dir}/runtime-init-conf.yaml --skip-telemetry
+ 
+runcmd:
+  # NOTE: Commands must be non-blocking so send long running commands (polling/waiting for mcpd) to the background
+  - /shared/custom-config.sh &
+  - /shared/runtime-conf-bash.bash &
+
