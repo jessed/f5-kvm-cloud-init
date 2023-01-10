@@ -43,6 +43,9 @@ fi
 
 echo
 
+# Print sample virt-install command.
+# This assumes that the default libvirt directory structure for Ubuntu is in-use.
+# Also assumes that the qcow2 a) already exists and b) uses the same name as the VM.
 cat << EOF
 virt-install \
 --name=${vm} \
