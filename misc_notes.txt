@@ -1,0 +1,13 @@
+# destroy, undefine the VM, Delete the current qcow2, Create a new qcow2, change qcow2 ownership to libvirt-qemu
+virsh destroy ltm03; virsh undefine ltm03; rm -f ltm03.qcow2; qemu-img create -F qcow2 -b /var/lib/libvirt/images/BIGIP-15.1.5.1-0.0.14.qcow2 -f qcow2 ltm03.qcow2 100G; sudo chown libvirt-qemu.kvm ltm03.qcow2
+
+# Export variables for use with curl for checking the status of DO requests
+export CREDS='admin:admin'
+export doUrl=mgmt/shared/declarative-onboarding
+export doInfoUrl=mgmt/shared/declarative-onboarding/info
+export doStatusLeg=mgmt/shared/declarative-onboarding?statusCodes=legacy
+export doStatusExp=mgmt/shared/declarative-onboarding?statusCodes=experimental
+
+curl -sku $CREDS https://localhost/$doUrl | jq .
+
+curl -sku $CREDS https://localhost/$doInfoUrl | jq .
