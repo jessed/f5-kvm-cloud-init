@@ -2,7 +2,7 @@
 
 vm='ltm03'
 src_yaml="${vm}.yaml"
-mount_dir="${vm}_ci"
+mount_dir="${vm}-ci"
 kvm_boot="/var/lib/libvirt/boot"
 cleanup=1
 MOUNT=0
@@ -17,10 +17,10 @@ test -d ${vm} || {
 cp -f $src_yaml ${vm}/openstack/latest/user_data
 
 # Ensure existing ISO isn't mounted, then delete the existing ISO
-if [[ -d ${vm}_ci ]]; then
+if [[ -d ${mount_dir} ]]; then
   # Unmount the existing ISO if it is mounted
   mount | grep -qs ${vm}
-  if [[ $? == 0 ]]; then sudo umount ${vm}_ci; rmdir ${vm}_ci; fi
+  if [[ $? == 0 ]]; then sudo umount ${mount_dir}; rmdir ${mount_dir}; fi
 
   # Delete the old ISO
   test -f ${vm}.iso && rm ${vm}.iso
@@ -37,15 +37,12 @@ if [[ $cleanup == 1 ]]; then rm -rf ${vm}; fi
 
 # If requested, mount the new ISO for inspection
 if [[ ${MOUNT} == 1 ]]; then 
-  mkdir ${vm}_ci
-  sudo mount ${vm}.iso ${vm}_ci -o loop
+  mkdir ${mount_dir}
+  sudo mount ${vm}.iso ${mount_dir} -o loop
 fi
 
 echo
 
-# Print sample virt-install command.
-# This assumes that the default libvirt directory structure for Ubuntu is in-use.
-# Also assumes that the qcow2 a) already exists and b) uses the same name as the VM.
 cat << EOF
 virt-install \
 --name=${vm} \
