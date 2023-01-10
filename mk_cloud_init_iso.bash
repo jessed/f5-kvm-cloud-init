@@ -1,16 +1,20 @@
 #! /bin/bash
 
-vm='ltm03'
-src_yaml="${vm}.yaml"
+src_yaml=$1
+
+vm=$(echo $1 | awk 'BEGIN { FS="." } { print $1 }')
 mount_dir="${vm}-ci"
 kvm_boot="/var/lib/libvirt/boot"
 cleanup=1
 MOUNT=0
 
-# cloud-init directory exists (for ISO creation)
+uuid_string='{"uuid": "534c4d5c-4b7d-4011-84a0-73ae2d2c2093"}'
+
+# Create the ISO directory structure for creation of the ISO
+# If it already exists, use the existing directory
 test -d ${vm} || {
   mkdir -p ${vm}/openstack/latest
-  echo '{"uuid": "534c4d5c-4b7d-4011-84a0-73ae2d2c2093"}' > ${vm}/openstack/latest/meta_data.json
+  echo $uuid_string > ${vm}/openstack/latest/meta_data.json
 }
 
 # copy latest version of cloud-init yaml into place
