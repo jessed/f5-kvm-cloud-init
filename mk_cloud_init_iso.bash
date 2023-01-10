@@ -45,13 +45,13 @@ echo
 
 cat << EOF
 virt-install \
---name=ltm03 \
+--name=${vm} \
 --vcpu=2 \
 --cpu host-passthrough \
 --ram=4096 \
 --os-variant=centos7.0 \
---disk path=/var/lib/libvirt/f5/ltm03.qcow2,format=qcow2 \
---disk path=/var/lib/libvirt/boot/ltm03.iso,device=cdrom \
+--disk path=/var/lib/libvirt/f5/${vm}.qcow2,format=qcow2 \
+--disk path=/var/lib/libvirt/boot/${vm}.iso,device=cdrom \
 --network network=mgmt,model=virtio \
 --network network=data10,model=virtio \
 --network network=data20,model=virtio \
